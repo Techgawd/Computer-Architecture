@@ -10,6 +10,14 @@ class CPU:
         self.ram = [0] * 256
         self.reg = [0] * 8
         self.pc = 0
+        # self.fl = 0b00000000
+        # self.position = 0
+        # flag register
+        self.fl = {
+            'E': 0,
+            'L': 0,
+            'G': 0
+        }
         self.branchtable = {}
         self.branchtable[130] = self.ldi
         self.branchtable[71] = self.prn
@@ -17,8 +25,15 @@ class CPU:
         self.branchtable[1] = self.hlt
         self.branchtable[69] = self.push
         self.branchtable[70] = self.pop
+        self.branchtable[80] = self.call
+        self.branchtable[17] = self.ret
+        self.branchtable[160] = self.add
+        self.branchtable[167] = self.cmp_f
+        self.branchtable[85] = self.jeq
+        self.branchtable[86] = self.jne
+        self.branchtable[84] = self.jmp
         self.running = False
-        # reserved as the stack pointer
+        # 7 is reserved as the stack pointer 
         self.sp = 7
 
     def load(self, filename):
@@ -60,14 +75,29 @@ class CPU:
             sys.exit(2)
 
 
-    def alu(self, op, reg_a, reg_b):
+    def alu(self, op):
         """ALU operations."""
+        reg_a = self.ram[self.pc + 1]
+        reg_b = self.ram[self.pc + 2]
 
         if op == "ADD":
             self.reg[reg_a] += self.reg[reg_b]
         elif op == 'MUL':
             self.reg[reg_a] *= self.reg[reg_b]
-        #elif op == "SUB": etc
+        elif op == "CMP":
+            # bit 2 set to 1 if a < b
+            if self.reg[reg_a] < self.reg[reg_b]:
+                self.fl['L'] = '1'
+                self.fl['E'] = '0'
+                self.fl['G'] = '0'
+            # bit 1 set to 1 if a > b 
+            elif self.reg[reg_a] > self.reg[reg_b]:
+                self.fl['G'] = '1'
+                self.fl['E'] = '0'
+                self.fl['L'] = '0'
+             # bit 0 set to 1 if equal
+            elif self.reg[reg_a] == self.reg[reg_b]:
+                self.fl['E'] = '1'
         else:
             raise Exception("Unsupported ALU operation")
 
@@ -103,8 +133,10 @@ class CPU:
 
     def hlt(self):
         self.running = False
+     # day 4 work implement stack, push, pop
 
-    # day 4 work implement stack, push, pop
+    #  Decrement the SP
+    # Copy the value in the given register to the address pointed to by SP
     def push(self):
         given_register = self.ram[self.pc + 1]
         value_in_register = self.reg[given_register]
@@ -112,6 +144,8 @@ class CPU:
         self.ram[self.reg[self.sp]] = value_in_register
         self.pc += 2 
 
+    # Copy the value from the address pointed to by SP to the given register.
+    # Increment SP.
     def pop(self):
         given_register = self.ram[self.pc + 1]
         value_from_memory = self.ram[self.reg[self.sp]]
@@ -119,11 +153,29 @@ class CPU:
         self.reg[self.sp] += 1
         self.pc += 2
 
+    # subroutine calls
+    # jump to address with CALL, and then return back to where you called from with RET 
+
+    # Calls a subroutine (function) at the address stored in the register.
+    # The address of the instruction directly after(above, in stack) CALL is pushed onto the stack.
+    # The PC is set to the address stored in the given register.
+    # We jump to that location in RAM and execute the first instruction in the subroutine.
+    def call(self):
+        given_register = self.ram[self.pc + 1]
+        self.reg[self.sp] -= 1
+        self.ram[self.reg[self.sp]] = self.pc + 2
+        self.pc = self.reg[given_register]
+
+    # Return from subroutine.
+    # Pop the value from the top of the stack and store it in the PC.
+    def ret(self):
+        self.pc = self.ram[self.reg[self.sp]]
+        self.reg[self.sp] += 1
 
     def ldi(self):
-        a = self.ram_read(self.pc + 1)
-        b = self.ram_read(self.pc + 2)
-        self.reg[a] = b
+        mar = self.ram_read(self.pc + 1)
+        mdr = self.ram_read(self.pc + 2)
+        self.reg[mar] = mdr
         self.pc += 3
 
     def prn(self):
@@ -137,40 +189,41 @@ class CPU:
         self.alu('MUL', a, b)
         self.pc += 3
 
+    def add(self):
+        self.alu('ADD')
+        self.pc += 3
+
+    def cmp_f(self):
+        self.alu('CMP')
+        self.pc += 3
+    # jump if equal flag set >> 0b1
+    def jeq(self):
+        if self.fl['E'] == '1':
+            given_register = self.ram[self.pc + 1]
+            self.pc = self.reg[given_register]
+        else:
+            self.pc += 2
+
+    # jump if E falg NOT set >> 0b100 OR 0b010
+    def jne(self):
+        if self.fl['E'] == '0':
+            given_register = self.ram[self.pc + 1]
+            self.pc = self.reg[given_register]
+        else:
+            self.pc += 2
+    # like GOTO, 1 way no-return
+    def jmp(self):
+        given_register = self.ram[self.pc + 1]
+        self.pc = self.reg[given_register]
+
     def run(self):
         """Run the CPU."""
         self.running = True
 
         self.reg[self.sp] = len(self.ram)
+        
+        # print(self.ram)
 
         while self.running:
             ir = self.ram_read(self.pc)
             self.branchtable[ir]()
-
-
-        # while running:
-        #     ir = self.ram_read(self.pc)
-
-        #     if ir == 162:
-        #         operand_a = self.ram_read(self.pc + 1)
-        #         operand_b = self.ram_read(self.pc + 2)
-        #         self.mul(operand_a, operand_b)
-        #         self.pc += 3
-
-        #     elif ir == 130:
-        #         operand_a = self.ram_read(self.pc + 1)
-        #         operand_b = self.ram_read(self.pc + 2)
-        #         self.ldi(operand_a, operand_b)
-        #         self.pc += 3
-
-        #     elif ir == 71:
-        #         operand_a = self.ram_read(self.pc + 1)
-        #         self.prn(operand_a)
-        #         self.pc += 2
-
-        #     elif ir == HLT:
-        #         running = False
-        #         self.pc += 1
-
-        #     else:
-        #         print(f'unknown')
